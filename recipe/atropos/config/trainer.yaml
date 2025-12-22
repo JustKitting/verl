@@ -1,0 +1,132 @@
+# Atropos + VeRL trainer configuration
+# Usage: python -m recipe.atropos.main --config-name trainer
+
+hydra:
+  searchpath:
+    - pkg://verl.trainer.config
+
+defaults:
+  - ppo_trainer
+  - _self_
+
+# =============================================================================
+# Atropos Environment Config (matches native Atropos format)
+# =============================================================================
+env:
+  group_size: ${actor_rollout_ref.rollout.n}
+  batch_size: ${data.train_batch_size}
+  tokenizer_name: ${actor_rollout_ref.model.path}
+  max_token_length: 2048
+  total_steps: ${trainer.total_training_steps}
+  steps_per_eval: 100
+  use_wandb: true
+  wandb_name: "gsm8k-verl"
+  rollout_server_url: ${atropos.api_url}
+
+# =============================================================================
+# Atropos Integration Settings
+# =============================================================================
+atropos:
+  api_url: "http://localhost:8000"
+  batch_timeout: 60.0
+  environment_module: "recipe.atropos.environments.gsm8k_upstream"
+  register_kwargs:
+    checkpoint_dir: "./checkpoints"
+    save_checkpoint_interval: 100
+  debug:
+    enabled: false
+    output_dir: "./logs"
+    save_tensors_at_steps: []
+  sync:
+    queue_threshold: 1
+    max_steps_between_sync: 4
+    min_steps_between_sync: 1
+    log_drift: true
+
+# =============================================================================
+# VeRL Trainer Settings
+# =============================================================================
+data:
+  train_batch_size: 16
+  truncation: 'error'
+  trust_remote_code: False
+
+algorithm:
+  adv_estimator: grpo
+  norm_adv_by_std_in_grpo: True
+  gamma: 1.0
+  lam: 1.0
+  use_kl_in_reward: False
+  kl_penalty: kl
+  kl_ctrl:
+    type: fixed
+    kl_coef: 0.1
+
+trainer:
+  project_name: verl-atropos
+  experiment_name: atropos_grpo
+  logger: ["console", "wandb"]
+  nnodes: 1
+  n_gpus_per_node: 1
+  total_training_steps: 5000
+  save_freq: 500
+  test_freq: 100
+  val_before_train: False
+
+actor_rollout_ref:
+  hybrid_engine: true
+
+  model:
+    path: "Qwen/Qwen3-0.6B"
+    lora_rank: 0
+    lora_alpha: 32
+    use_remove_padding: True
+    enable_gradient_checkpointing: True
+
+  actor:
+    strategy: fsdp
+    optim:
+      lr: 1e-6
+    ppo_mini_batch_size: ${data.train_batch_size}
+    ppo_micro_batch_size_per_gpu: 8
+    ppo_epochs: 1
+    use_rollout_log_probs: true
+    loss_agg_mode: token-mean
+    use_kl_loss: True
+    kl_loss_coef: 0.001
+    kl_loss_type: low_var_kl
+    entropy_coeff: 0.01
+    grad_clip: 1.0
+    fsdp_config:
+      param_offload: False
+      optimizer_offload: False
+
+  rollout:
+    mode: async
+    name: sglang
+    prompt_length: 1024
+    response_length: 1024
+    temperature: 0.7
+    n: 8
+    tensor_model_parallel_size: 2
+    gpu_memory_utilization: 0.6
+    log_prob_micro_batch_size_per_gpu: 8
+    load_format: safetensors
+    engine_kwargs:
+      sglang:
+        attention_backend: flashinfer
+
+  ref:
+    log_prob_micro_batch_size_per_gpu: 8
+    fsdp_config:
+      param_offload: True
+
+reward_model:
+  enable: False
+
+use_val_reward_fn: False
+
+ray_kwargs:
+  ray_init:
+    address: null
+    namespace: verl
