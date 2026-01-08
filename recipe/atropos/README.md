@@ -115,6 +115,44 @@ python -m recipe.atropos.environments.gsm8k serve \
     --env.rollout_server_url http://localhost:8000
 ```
 
+## Known Issues & Patches
+
+When using certain models or configurations, you may need to apply runtime patches to work around upstream bugs.
+
+### 1. SGLang Dict Chat Template (Hermes/Tool-Calling Models)
+
+Models with tool-calling support (like DeepHermes) have `chat_template` as a dict/list instead of string. SGLang 0.5.6 crashes with `TypeError: expected string or bytes-like object, got 'dict'`.
+
+**Patch:**
+```bash
+SGLANG_TM=$(python -c "import sglang.srt.managers.template_manager as tm; print(tm.__file__)")
+sed -i "s/has_reasoning = re.search(force_reasoning_pattern, template) is not None/has_reasoning = re.search(force_reasoning_pattern, template) is not None if isinstance(template, str) else False/" "$SGLANG_TM"
+```
+
+### 2. FSDP CPU Offload for Ref Model
+
+VeRL hardcodes `CPUOffload(offload_params=True)` for reference models regardless of config. On systems with limited RAM, this causes OOM.
+
+**Patch** (respects `fsdp_config.param_offload` setting):
+```bash
+FSDP_WORKERS=$(python -c "import verl.workers.fsdp_workers as fw; print(fw.__file__)")
+sed -i "s|cpu_offload = None if role == \"actor\" else CPUOffload(offload_params=True)|cpu_offload = None if role == \"actor\" else (CPUOffload(offload_params=True) if getattr(fsdp_config, \"param_offload\", False) else None)|" "$FSDP_WORKERS"
+```
+
+### 3. SGLang Cache Flush Assertion
+
+Known bug ([sgl-project/sglang#12099](https://github.com/sgl-project/sglang/issues/12099)): Cache flush fails after weight updates in async mode.
+
+**Patch** (skip assertion):
+```bash
+SGLANG_MIXIN=$(python -c "import sglang.srt.managers.scheduler_update_weights_mixin as m; print(m.__file__)")
+sed -i "s|assert flush_cache_success, \"Cache flush failed after updating weights\"|pass  # Skipped: flush_cache_success assertion (see github.com/sgl-project/sglang/issues/12099)|" "$SGLANG_MIXIN"
+```
+
+### Applying Patches
+
+Apply these patches after installing dependencies but before starting training. They modify installed packages in-place.
+
 ## References
 
 - [Atropos Repository](https://github.com/NousResearch/atropos)

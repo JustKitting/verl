@@ -69,14 +69,11 @@ def compute_advantage_with_atropos_override(
     """
     Compute advantage, but use Atropos-provided advantages if available.
 
-    If data.batch contains "atropos_advantages", use those directly instead
-    of computing via GRPO. This allows Atropos environments to provide
-    custom token-level credit assignment.
+    If data.batch contains "atropos_advantages", ADD those to the computed
+    GRPO advantages. This allows environments to provide formatting bonuses
+    on top of the correctness signal.
     """
-    if "atropos_advantages" in data.batch.keys():
-        data.batch["advantages"] = data.batch["atropos_advantages"]
-        return data
-
+    # First compute GRPO advantages normally (captures correctness)
     data = compute_advantage(
         data=data,
         adv_estimator=adv_estimator,
@@ -86,6 +83,10 @@ def compute_advantage_with_atropos_override(
         norm_adv_by_std_in_grpo=norm_adv_by_std_in_grpo,
         config=config,
     )
+
+    # Add Atropos formatting bonuses on top of GRPO advantages
+    if "atropos_advantages" in data.batch.keys():
+        data.batch["advantages"] = data.batch["advantages"] + data.batch["atropos_advantages"]
 
     return data
 
